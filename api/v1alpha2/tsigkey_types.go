@@ -22,7 +22,15 @@ type TSIGKeySpec struct {
 	Algorithm string `json:"algorithm"`
 	// SecretRef references a Kubernetes Secret containing the TSIG key value
 	// The secret must contain a key named "key" with the base64-encoded secret
-	SecretRef SecretReference `json:"secretRef"`
+	// Either SecretRef or Key must be provided, but not both
+	// +optional
+	SecretRef *SecretReference `json:"secretRef,omitempty"`
+	// Key contains the base64-encoded TSIG key value directly in the spec
+	// WARNING: Storing sensitive data directly in the CRD is insecure as it will be visible
+	// in plain text in the Kubernetes API and etcd. Use SecretRef instead for production environments.
+	// Either SecretRef or Key must be provided, but not both
+	// +optional
+	Key *string `json:"key,omitempty"`
 }
 
 // SecretReference contains information to locate a Kubernetes Secret
