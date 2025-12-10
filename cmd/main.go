@@ -212,8 +212,9 @@ func main() {
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 		PDNSClient: controller.PdnsClienter{
-			Records: pdnsClient.Records,
-			Zones:   pdnsClient.Zones,
+			Records:  pdnsClient.Records,
+			Zones:    pdnsClient.Zones,
+			TSIGKeys: pdnsClient.TSIGKeys,
 		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Zone")
@@ -223,8 +224,9 @@ func main() {
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 		PDNSClient: controller.PdnsClienter{
-			Records: pdnsClient.Records,
-			Zones:   pdnsClient.Zones,
+			Records:  pdnsClient.Records,
+			Zones:    pdnsClient.Zones,
+			TSIGKeys: pdnsClient.TSIGKeys,
 		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "RRset")
@@ -234,8 +236,9 @@ func main() {
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 		PDNSClient: controller.PdnsClienter{
-			Records: pdnsClient.Records,
-			Zones:   pdnsClient.Zones,
+			Records:  pdnsClient.Records,
+			Zones:    pdnsClient.Zones,
+			TSIGKeys: pdnsClient.TSIGKeys,
 		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ClusterZone")
@@ -245,11 +248,36 @@ func main() {
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 		PDNSClient: controller.PdnsClienter{
-			Records: pdnsClient.Records,
-			Zones:   pdnsClient.Zones,
+			Records:  pdnsClient.Records,
+			Zones:    pdnsClient.Zones,
+			TSIGKeys: pdnsClient.TSIGKeys,
 		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ClusterRRset")
+		os.Exit(1)
+	}
+	if err = (&controller.TSIGKeyReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+		PDNSClient: controller.PdnsClienter{
+			Records:  pdnsClient.Records,
+			Zones:    pdnsClient.Zones,
+			TSIGKeys: pdnsClient.TSIGKeys,
+		},
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "TSIGKey")
+		os.Exit(1)
+	}
+	if err = (&controller.ClusterTSIGKeyReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+		PDNSClient: controller.PdnsClienter{
+			Records:  pdnsClient.Records,
+			Zones:    pdnsClient.Zones,
+			TSIGKeys: pdnsClient.TSIGKeys,
+		},
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "ClusterTSIGKey")
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder

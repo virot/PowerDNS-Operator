@@ -32,6 +32,9 @@ type ZoneSpec struct {
 	// +kubebuilder:default:="DEFAULT"
 	// +optional
 	SOAEditAPI *string `json:"soa_edit_api,omitempty"`
+	// List of TSIG key IDs for RFC2136 DDNS and zone transfers when acting as master
+	// +optional
+	TsigKeyIds []string `json:"tsigKeyIds,omitempty"`
 }
 
 // ZoneStatus defines the observed state of Zone

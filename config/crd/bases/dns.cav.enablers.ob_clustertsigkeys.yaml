@@ -4,20 +4,20 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.18.0
-  name: clusterzones.dns.cav.enablers.ob
+  name: clustertsigkeys.dns.cav.enablers.ob
 spec:
   group: dns.cav.enablers.ob
   names:
-    kind: ClusterZone
-    listKind: ClusterZoneList
-    plural: clusterzones
-    singular: clusterzone
+    kind: ClusterTSIGKey
+    listKind: ClusterTSIGKeyList
+    plural: clustertsigkeys
+    singular: clustertsigkey
   scope: Cluster
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status.serial
-      name: Serial
-      type: integer
+    - jsonPath: .spec.algorithm
+      name: Algorithm
+      type: string
     - jsonPath: .status.id
       name: ID
       type: string
@@ -27,7 +27,7 @@ spec:
     name: v1alpha2
     schema:
       openAPIV3Schema:
-        description: ClusterZone is the Schema for the clusterzones API
+        description: ClusterTSIGKey is the Schema for the clustertsigkeys API
         properties:
           apiVersion:
             description: |-
@@ -47,54 +47,47 @@ spec:
           metadata:
             type: object
           spec:
-            description: ZoneSpec defines the desired state of Zone
+            description: TSIGKeySpec defines the desired state of TSIGKey
             properties:
-              catalog:
-                description: The catalog this zone is a member of
-                type: string
-              kind:
-                description: Kind of the zone, one of "Native", "Master", "Slave",
-                  "Producer", "Consumer".
+              algorithm:
+                description: Algorithm for the TSIG key, e.g., "hmac-sha256", "hmac-sha512"
                 enum:
-                - Native
-                - Master
-                - Slave
-                - Producer
-                - Consumer
+                - hmac-md5
+                - hmac-sha1
+                - hmac-sha224
+                - hmac-sha256
+                - hmac-sha384
+                - hmac-sha512
                 type: string
-              nameservers:
-                description: List of the nameservers of the zone.
-                items:
-                  pattern: ^([a-zA-Z0-9-]+\.)*[a-zA-Z0-9-]+$
-                  type: string
-                minItems: 1
-                type: array
-              soa_edit_api:
-                default: DEFAULT
-                description: The SOA-EDIT-API metadata item, one of "DEFAULT", "INCREASE",
-                  "EPOCH", defaults to "DEFAULT"
-                enum:
-                - DEFAULT
-                - INCREASE
-                - EPOCH
-                type: string
-              tsigKeyIds:
-                description: List of TSIG key IDs for RFC2136 DDNS and zone transfers
-                  when acting as master
-                items:
-                  type: string
-                type: array
+              secretRef:
+                description: |-
+                  SecretRef references a Kubernetes Secret containing the TSIG key value
+                  The secret must contain a key named "key" with the base64-encoded secret
+                properties:
+                  name:
+                    description: Name of the secret in the same namespace (for TSIGKey)
+                      or specified namespace (for ClusterTSIGKey)
+                    type: string
+                  namespace:
+                    description: Namespace of the secret (only used for ClusterTSIGKey,
+                      ignored for TSIGKey)
+                    type: string
+                required:
+                - name
+                type: object
             required:
-            - kind
-            - nameservers
+            - algorithm
+            - secretRef
             type: object
           status:
-            description: ZoneStatus defines the observed state of Zone
+            description: TSIGKeyStatus defines the observed state of TSIGKey
             properties:
-              catalog:
-                description: The catalog this zone is a member of.
+              algorithm:
+                description: Algorithm used for the TSIG key
                 type: string
               conditions:
+                description: Conditions represent the latest available observations
+                  of the TSIGKey's state
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -150,41 +143,19 @@ spec:
                   - type
                   type: object
                 type: array
-              dnssec:
-                description: Whether or not this zone is DNSSEC signed.
-                type: boolean
-              edited_serial:
-                description: The SOA serial as seen in query responses.
-                format: int32
-                type: integer
               id:
-                description: ID define the opaque zone id.
+                description: ID of the TSIG key in PowerDNS
                 type: string
-              kind:
-                description: Kind of the zone, one of "Native", "Master", "Slave",
-                  "Producer", "Consumer".
-                type: string
-              masters:
-                description: List of IP addresses configured as a master for this
-                  zone ("Slave" type zones only).
-                items:
-                  type: string
-                type: array
               name:
-                description: Name of the zone (e.g. "example.com.")
+                description: Name of the TSIG key in PowerDNS
                 type: string
-              notified_serial:
-                description: The SOA serial notifications have been sent out for
-                format: int32
-                type: integer
               observedGeneration:
+                description: ObservedGeneration reflects the generation of the most
+                  recently observed TSIGKey
                 format: int64
                 type: integer
-              serial:
-                description: The SOA serial number.
-                format: int32
-                type: integer
               syncStatus:
+                description: SyncStatus indicates the synchronization status
                 type: string
             type: object
         type: object
