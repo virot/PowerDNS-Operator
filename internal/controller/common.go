@@ -616,16 +616,27 @@ func tsigKeyReconcile(ctx context.Context, gt dnsv1alpha2.GenericTSIGKey, isModi
 		return ctrl.Result{}, nil
 	}
 
-	// Validate that either SecretRef or Key is provided, but not both
-	if gt.GetSpec().SecretRef == nil && gt.GetSpec().Key == nil {
+	// Get the secret containing the TSIG key
+	secretNamespace := gt.GetObjectMeta().Namespace
+	if secretNamespace == "" {
+		// For ClusterTSIGKey, use the namespace from the SecretRef
+		secretNamespace = gt.GetSpec().SecretRef.Namespace
+	}
+
+	secret := &corev1.Secret{}
+	secretKey := client.ObjectKey{
+		Name:      gt.GetSpec().SecretRef.Name,
+		Namespace: secretNamespace,
+	}
+	if err := cl.Get(ctx, secretKey, secret); err != nil {
 		original := gt.Copy()
 		conditions := gt.GetStatus().Conditions
 		meta.SetStatusCondition(&conditions, metav1.Condition{
 			Type:               "Available",
 			Status:             metav1.ConditionFalse,
 			LastTransitionTime: metav1.Time{Time: time.Now().UTC()},
-			Reason:             TSIGKeyReasonSynchronizationFailed,
-			Message:            "Either secretRef or key must be provided",
+			Reason:             TSIGKeyReasonSecretNotFound,
+			Message:            TSIGKeyMessageSecretNotFound + ": " + err.Error(),
 		})
 		gt.SetStatus(dnsv1alpha2.TSIGKeyStatus{
 			SyncStatus:         ptr.To(FAILED_STATUS),
@@ -639,15 +650,17 @@ func tsigKeyReconcile(ctx context.Context, gt dnsv1alpha2.GenericTSIGKey, isModi
 		return ctrl.Result{}, nil
 	}
 
-	if gt.GetSpec().SecretRef != nil && gt.GetSpec().Key != nil {
+	// Get the key value from the secret
+	keyValue, ok := secret.Data["key"]
+	if !ok {
 		original := gt.Copy()
 		conditions := gt.GetStatus().Conditions
 		meta.SetStatusCondition(&conditions, metav1.Condition{
 			Type:               "Available",
 			Status:             metav1.ConditionFalse,
 			LastTransitionTime: metav1.Time{Time: time.Now().UTC()},
-			Reason:             TSIGKeyReasonSynchronizationFailed,
-			Message:            "Only one of secretRef or key must be provided, not both",
+			Reason:             TSIGKeyReasonSecretNotFound,
+			Message:            "Secret does not contain 'key' field",
 		})
 		gt.SetStatus(dnsv1alpha2.TSIGKeyStatus{
 			SyncStatus:         ptr.To(FAILED_STATUS),
@@ -659,73 +672,6 @@ func tsigKeyReconcile(ctx context.Context, gt dnsv1alpha2.GenericTSIGKey, isModi
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil
-	}
-
-	var keyValue string
-
-	// Get the key value either from Secret or directly from spec
-	if gt.GetSpec().SecretRef != nil {
-		// Get the secret containing the TSIG key
-		secretNamespace := gt.GetObjectMeta().Namespace
-		if secretNamespace == "" {
-			// For ClusterTSIGKey, use the namespace from the SecretRef
-			secretNamespace = gt.GetSpec().SecretRef.Namespace
-		}
-
-		secret := &corev1.Secret{}
-		secretKey := client.ObjectKey{
-			Name:      gt.GetSpec().SecretRef.Name,
-			Namespace: secretNamespace,
-		}
-		if err := cl.Get(ctx, secretKey, secret); err != nil {
-			original := gt.Copy()
-			conditions := gt.GetStatus().Conditions
-			meta.SetStatusCondition(&conditions, metav1.Condition{
-				Type:               "Available",
-				Status:             metav1.ConditionFalse,
-				LastTransitionTime: metav1.Time{Time: time.Now().UTC()},
-				Reason:             TSIGKeyReasonSecretNotFound,
-				Message:            TSIGKeyMessageSecretNotFound + ": " + err.Error(),
-			})
-			gt.SetStatus(dnsv1alpha2.TSIGKeyStatus{
-				SyncStatus:         ptr.To(FAILED_STATUS),
-				ObservedGeneration: &gt.GetObjectMeta().Generation,
-				Conditions:         conditions,
-			})
-			if err := cl.Status().Patch(ctx, gt, client.MergeFrom(original)); err != nil {
-				log.Error(err, "unable to patch TSIGKey status")
-				return ctrl.Result{}, err
-			}
-			return ctrl.Result{}, nil
-		}
-
-		// Get the key value from the secret
-		keyValueBytes, ok := secret.Data["key"]
-		if !ok {
-			original := gt.Copy()
-			conditions := gt.GetStatus().Conditions
-			meta.SetStatusCondition(&conditions, metav1.Condition{
-				Type:               "Available",
-				Status:             metav1.ConditionFalse,
-				LastTransitionTime: metav1.Time{Time: time.Now().UTC()},
-				Reason:             TSIGKeyReasonSecretNotFound,
-				Message:            "Secret does not contain 'key' field",
-			})
-			gt.SetStatus(dnsv1alpha2.TSIGKeyStatus{
-				SyncStatus:         ptr.To(FAILED_STATUS),
-				ObservedGeneration: &gt.GetObjectMeta().Generation,
-				Conditions:         conditions,
-			})
-			if err := cl.Status().Patch(ctx, gt, client.MergeFrom(original)); err != nil {
-				log.Error(err, "unable to patch TSIGKey status")
-				return ctrl.Result{}, err
-			}
-			return ctrl.Result{}, nil
-		}
-		keyValue = string(keyValueBytes)
-	} else {
-		// Use the key directly from spec
-		keyValue = *gt.GetSpec().Key
 	}
 
 	// Get TSIG key from PowerDNS
@@ -734,7 +680,7 @@ func tsigKeyReconcile(ctx context.Context, gt dnsv1alpha2.GenericTSIGKey, isModi
 		return ctrl.Result{}, err
 	}
 
-	syncStatus, conditionMessage, conditionReason, conditionStatus, err := tsigKeyExternalResourcesReconcile(ctx, tsigKeyRes, gt, keyValue, PDNSClient, log)
+	syncStatus, conditionMessage, conditionReason, conditionStatus, err := tsigKeyExternalResourcesReconcile(ctx, tsigKeyRes, gt, string(keyValue), PDNSClient, log)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
