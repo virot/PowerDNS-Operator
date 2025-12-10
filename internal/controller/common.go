@@ -360,13 +360,14 @@ func createZoneExternalResources(ctx context.Context, zone dnsv1alpha2.GenericZo
 	}
 
 	z := powerdns.Zone{
-		ID:          &zone.GetObjectMeta().Name,
-		Name:        &zone.GetObjectMeta().Name,
-		Kind:        powerdns.ZoneKindPtr(powerdns.ZoneKind(zone.GetSpec().Kind)),
-		DNSsec:      ptr.To(false),
-		SOAEditAPI:  zone.GetSpec().SOAEditAPI,
-		Nameservers: zone.GetSpec().Nameservers,
-		Catalog:     catalog,
+		ID:               &zone.GetObjectMeta().Name,
+		Name:             &zone.GetObjectMeta().Name,
+		Kind:             powerdns.ZoneKindPtr(powerdns.ZoneKind(zone.GetSpec().Kind)),
+		DNSsec:           ptr.To(false),
+		SOAEditAPI:       zone.GetSpec().SOAEditAPI,
+		Nameservers:      zone.GetSpec().Nameservers,
+		Catalog:          catalog,
+		MasterTSIGKeyIDs: zone.GetSpec().TsigKeyIds,
 	}
 
 	_, err := PDNSClient.Zones.Add(ctx, &z)
@@ -388,11 +389,12 @@ func updateZoneExternalResources(ctx context.Context, zone dnsv1alpha2.GenericZo
 	}
 
 	err := PDNSClient.Zones.Change(ctx, zone.GetObjectMeta().Name, &powerdns.Zone{
-		Name:        &zone.GetObjectMeta().Name,
-		Kind:        &zoneKind,
-		Nameservers: zone.GetSpec().Nameservers,
-		Catalog:     catalog,
-		SOAEditAPI:  zone.GetSpec().SOAEditAPI,
+		Name:             &zone.GetObjectMeta().Name,
+		Kind:             &zoneKind,
+		Nameservers:      zone.GetSpec().Nameservers,
+		Catalog:          catalog,
+		SOAEditAPI:       zone.GetSpec().SOAEditAPI,
+		MasterTSIGKeyIDs: zone.GetSpec().TsigKeyIds,
 	})
 	if err != nil {
 		log.Error(err, "Failed to update zone")

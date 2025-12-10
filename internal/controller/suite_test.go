@@ -384,7 +384,11 @@ func (m mockZonesClient) Change(ctx context.Context, domain string, zone *powerd
 		return powerdns.Error{StatusCode: ZONE_NOT_FOUND_CODE, Status: fmt.Sprintf("%d %s", ZONE_NOT_FOUND_CODE, ZONE_NOT_FOUND_MSG), Message: ZONE_NOT_FOUND_MSG}
 	}
 	serial := localZone.Serial
-	if *zone.Kind != *localZone.Kind || *zone.Catalog != *localZone.Catalog || *zone.SOAEditAPI != *localZone.SOAEditAPI {
+
+	// Compare TSIG keys
+	tsigKeysChanged := !reflect.DeepEqual(zone.MasterTSIGKeyIDs, localZone.MasterTSIGKeyIDs)
+
+	if *zone.Kind != *localZone.Kind || *zone.Catalog != *localZone.Catalog || *zone.SOAEditAPI != *localZone.SOAEditAPI || tsigKeysChanged {
 		switch *zone.SOAEditAPI {
 		case "EPOCH":
 			serial = ptr.To(uint32(time.Now().UTC().Unix()))
@@ -574,5 +578,15 @@ func getMockedCatalog(zoneName string) (result string) {
 func getMockedSOAEditAPI(zoneName string) (result string) {
 	zone, _ := readFromZonesMap(makeCanonical(zoneName))
 	result = ptr.Deref(zone.SOAEditAPI, "")
+	return
+}
+
+func getMockedTsigKeyIds(zoneName string) (result []string) {
+	zone, _ := readFromZonesMap(makeCanonical(zoneName))
+	if zone.MasterTSIGKeyIDs != nil {
+		result = zone.MasterTSIGKeyIDs
+	} else {
+		result = []string{}
+	}
 	return
 }

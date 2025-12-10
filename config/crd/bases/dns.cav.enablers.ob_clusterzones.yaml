@@ -78,6 +78,12 @@ spec:
                 - INCREASE
                 - EPOCH
                 type: string
+              tsigKeyIds:
+                description: List of TSIG key IDs for RFC2136 DDNS and zone transfers
+                  when acting as master
+                items:
+                  type: string
+                type: array
             required:
             - kind
             - nameservers

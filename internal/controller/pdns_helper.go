@@ -46,14 +46,27 @@ type PdnsClienter struct {
 	Zones   pdnsZonesClienter
 }
 
-// zoneIsIdenticalToExternalZone return True, True if respectively kind, soa_edit_api and catalog are identical
+// zoneIsIdenticalToExternalZone return True, True if respectively kind, soa_edit_api, catalog and tsigKeyIds are identical
 // and nameservers are identical between Zone and External Resource
 func zoneIsIdenticalToExternalZone(zone dnsv1alpha2.GenericZone, externalZone *powerdns.Zone, ns []string) (bool, bool) {
 	zoneCatalog := makeCanonical(ptr.Deref(zone.GetSpec().Catalog, ""))
 	externalZoneCatalog := ptr.Deref(externalZone.Catalog, "")
 	zoneSOAEditAPI := ptr.Deref(zone.GetSpec().SOAEditAPI, "")
 	externalZoneSOAEditAPI := ptr.Deref(externalZone.SOAEditAPI, "")
-	return zone.GetSpec().Kind == string(*externalZone.Kind) && zoneCatalog == externalZoneCatalog && zoneSOAEditAPI == externalZoneSOAEditAPI, reflect.DeepEqual(zone.GetSpec().Nameservers, ns)
+
+	// Compare TSIG key IDs - handle both MasterTSIGKeyIDs and SlaveTSIGKeyIDs
+	// For simplicity, we use MasterTSIGKeyIDs as the primary field
+	externalTsigKeys := externalZone.MasterTSIGKeyIDs
+	if externalTsigKeys == nil {
+		externalTsigKeys = []string{}
+	}
+	zoneTsigKeys := zone.GetSpec().TsigKeyIds
+	if zoneTsigKeys == nil {
+		zoneTsigKeys = []string{}
+	}
+	tsigKeysIdentical := reflect.DeepEqual(zoneTsigKeys, externalTsigKeys)
+
+	return zone.GetSpec().Kind == string(*externalZone.Kind) && zoneCatalog == externalZoneCatalog && zoneSOAEditAPI == externalZoneSOAEditAPI && tsigKeysIdentical, reflect.DeepEqual(zone.GetSpec().Nameservers, ns)
 }
 
 // rrsetIsIdenticalToExternalRRset return True if Comments, Name, Type, TTL and Records are identical between RRSet and External Resource

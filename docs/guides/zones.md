@@ -10,6 +10,7 @@ The `Zone` specification contains the following fields:
 | nameservers | []string | Y | List of the nameservers of the zone |
 | catalog | string | N | The catalog this zone is a member of |
 | soa_edit_api | string | N | The SOA-EDIT-API metadata item, one of "DEFAULT", "INCREASE", "EPOCH", defaults to "DEFAULT" |
+| tsigKeyIds | []string | N | List of TSIG key IDs for RFC2136 DDNS and zone transfers when acting as master |
 
 ## Example
 
@@ -27,6 +28,29 @@ spec:
   catalog: catalog.helloworld
   soa_edit_api: EPOCH
 ```
+
+### Example with RFC2136/TSIG Keys
+
+To enable RFC2136 dynamic DNS updates with TSIG authentication:
+
+```yaml
+apiVersion: dns.cav.enablers.ob/v1alpha2
+kind: Zone
+metadata:
+  name: helloworld.com
+  namespace: default
+spec:
+  nameservers:
+    - ns1.helloworld.com
+    - ns2.helloworld.com
+  kind: Master
+  tsigKeyIds:
+    - update-key
+    - transfer-key
+```
+
+**Note:** TSIG keys must be pre-configured in PowerDNS using the PowerDNS API (`/api/v1/servers/{server_id}/tsigkeys`) before they can be referenced in the zone specification.
+
 
 ## Reconciliation Flow
 

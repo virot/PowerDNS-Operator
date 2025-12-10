@@ -296,6 +296,46 @@ var _ = Describe("Zone Controller", func() {
 	})
 
 	Context("When existing resource", func() {
+		It("should successfully modify the tsigKeyIds of the zone", Label("zone-modification", "tsig-key-ids"), func() {
+			ctx := context.Background()
+			// Specific test variables
+			modifiedResourceTsigKeyIds := []string{"update-key", "transfer-key"}
+
+			By("Getting the initial Serial of the resource")
+			zone := &dnsv1alpha2.Zone{}
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, typeNamespacedName, zone)
+				return err == nil && zone.Status.Serial != nil
+			}, timeout, interval).Should(BeTrue())
+			initialSerial := *zone.Status.Serial
+
+			By("Modifying the resource")
+			resource := &dnsv1alpha2.Zone{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: resourceNamespace,
+				},
+			}
+			_, err := controllerutil.CreateOrUpdate(ctx, k8sClient, resource, func() error {
+				resource.Spec.TsigKeyIds = modifiedResourceTsigKeyIds
+				return nil
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Getting the modified resource")
+			modifiedZone := &dnsv1alpha2.Zone{}
+			// Waiting for the resource to be fully modified
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, typeNamespacedName, modifiedZone)
+				return err == nil && modifiedZone.IsInExpectedStatus(MODIFIED_GENERATION, SUCCEEDED_STATUS)
+			}, timeout, interval).Should(BeTrue())
+			expectedSerial := initialSerial + uint32(1)
+			Expect(getMockedTsigKeyIds(resourceName)).To(Equal(modifiedResourceTsigKeyIds), "TSIG key IDs should be equal")
+			Expect(*(modifiedZone.Status.Serial)).To(Equal(expectedSerial), "Serial should be incremented")
+		})
+	})
+
+	Context("When existing resource", func() {
 		It("should successfully recreate an existing zone", Label("zone-recreation"), func() {
 			ctx := context.Background()
 			// Specific test variables
