@@ -54,8 +54,7 @@ func zoneIsIdenticalToExternalZone(zone dnsv1alpha2.GenericZone, externalZone *p
 	zoneSOAEditAPI := ptr.Deref(zone.GetSpec().SOAEditAPI, "")
 	externalZoneSOAEditAPI := ptr.Deref(externalZone.SOAEditAPI, "")
 
-	// Compare TSIG key IDs - handle both MasterTSIGKeyIDs and SlaveTSIGKeyIDs
-	// For simplicity, we use MasterTSIGKeyIDs as the primary field
+	// Compare TSIG key IDs - maps to PowerDNS MasterTSIGKeyIDs field
 	externalTsigKeys := externalZone.MasterTSIGKeyIDs
 	if externalTsigKeys == nil {
 		externalTsigKeys = []string{}
