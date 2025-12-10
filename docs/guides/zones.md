@@ -49,7 +49,9 @@ spec:
     - transfer-key
 ```
 
-**Note:** TSIG keys must be pre-configured in PowerDNS using the PowerDNS API (`/api/v1/servers/{server_id}/tsigkeys`) before they can be referenced in the zone specification.
+**Note:** TSIG keys can be managed in two ways:
+1. Pre-configured in PowerDNS using the PowerDNS API (`/api/v1/servers/{server_id}/tsigkeys`)
+2. Managed via Kubernetes using [TSIGKey](tsigkeys.md) or [ClusterTSIGKey](clustertsigkeys.md) resources (recommended)
 
 
 ## Reconciliation Flow

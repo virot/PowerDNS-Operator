@@ -19,6 +19,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/joeig/go-powerdns/v3"
 	dnsv1alpha2 "github.com/powerdns-operator/powerdns-operator/api/v1alpha2"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -574,4 +575,231 @@ func ownObject(ctx context.Context, zone dnsv1alpha2.GenericZone, rrset dnsv1alp
 		return err
 	}
 	return cl.Update(ctx, rrset)
+}
+
+func tsigKeyReconcile(ctx context.Context, gt dnsv1alpha2.GenericTSIGKey, isModified bool, isDeleted bool, cl client.Client, PDNSClient PdnsClienter, log logr.Logger) (ctrl.Result, error) {
+	isInFailedStatus := (gt.GetStatus().SyncStatus != nil && *gt.GetStatus().SyncStatus == FAILED_STATUS)
+
+	// examine DeletionTimestamp to determine if object is under deletion
+	if !isDeleted {
+		// The object is not being deleted, so if it does not have our finalizer,
+		// then lets add the finalizer and update the object. This is equivalent
+		// to registering our finalizer.
+		if !controllerutil.ContainsFinalizer(gt, RESOURCES_FINALIZER_NAME) {
+			controllerutil.AddFinalizer(gt, RESOURCES_FINALIZER_NAME)
+			if err := cl.Update(ctx, gt); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+	} else {
+		// The object is being deleted
+		if controllerutil.ContainsFinalizer(gt, RESOURCES_FINALIZER_NAME) {
+			// our finalizer is present, so lets handle any external dependency
+			if err := deleteTSIGKeyExternalResources(ctx, gt, PDNSClient, log); err != nil {
+				// if fail to delete the external resource, return with error
+				// so that it can be retried
+				return ctrl.Result{}, err
+			}
+			// remove our finalizer from the list and update it.
+			controllerutil.RemoveFinalizer(gt, RESOURCES_FINALIZER_NAME)
+			if err := cl.Update(ctx, gt); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+
+		// Stop reconciliation as the item is being deleted
+		return ctrl.Result{}, nil
+	}
+
+	// We cannot exit previously (at the early moments of reconcile), because we have to allow deletion process
+	if isInFailedStatus && !isModified {
+		return ctrl.Result{}, nil
+	}
+
+	// Get the secret containing the TSIG key
+	secretNamespace := gt.GetObjectMeta().Namespace
+	if secretNamespace == "" {
+		// For ClusterTSIGKey, use the namespace from the SecretRef
+		secretNamespace = gt.GetSpec().SecretRef.Namespace
+	}
+
+	secret := &corev1.Secret{}
+	secretKey := client.ObjectKey{
+		Name:      gt.GetSpec().SecretRef.Name,
+		Namespace: secretNamespace,
+	}
+	if err := cl.Get(ctx, secretKey, secret); err != nil {
+		original := gt.Copy()
+		conditions := gt.GetStatus().Conditions
+		meta.SetStatusCondition(&conditions, metav1.Condition{
+			Type:               "Available",
+			Status:             metav1.ConditionFalse,
+			LastTransitionTime: metav1.Time{Time: time.Now().UTC()},
+			Reason:             TSIGKeyReasonSecretNotFound,
+			Message:            TSIGKeyMessageSecretNotFound + ": " + err.Error(),
+		})
+		gt.SetStatus(dnsv1alpha2.TSIGKeyStatus{
+			SyncStatus:         ptr.To(FAILED_STATUS),
+			ObservedGeneration: &gt.GetObjectMeta().Generation,
+			Conditions:         conditions,
+		})
+		if err := cl.Status().Patch(ctx, gt, client.MergeFrom(original)); err != nil {
+			log.Error(err, "unable to patch TSIGKey status")
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// Get the key value from the secret
+	keyValue, ok := secret.Data["key"]
+	if !ok {
+		original := gt.Copy()
+		conditions := gt.GetStatus().Conditions
+		meta.SetStatusCondition(&conditions, metav1.Condition{
+			Type:               "Available",
+			Status:             metav1.ConditionFalse,
+			LastTransitionTime: metav1.Time{Time: time.Now().UTC()},
+			Reason:             TSIGKeyReasonSecretNotFound,
+			Message:            "Secret does not contain 'key' field",
+		})
+		gt.SetStatus(dnsv1alpha2.TSIGKeyStatus{
+			SyncStatus:         ptr.To(FAILED_STATUS),
+			ObservedGeneration: &gt.GetObjectMeta().Generation,
+			Conditions:         conditions,
+		})
+		if err := cl.Status().Patch(ctx, gt, client.MergeFrom(original)); err != nil {
+			log.Error(err, "unable to patch TSIGKey status")
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// Get TSIG key from PowerDNS
+	tsigKeyRes, err := getTSIGKeyExternalResources(ctx, gt.GetObjectMeta().Name, PDNSClient, log)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	syncStatus, conditionMessage, conditionReason, conditionStatus, err := tsigKeyExternalResourcesReconcile(ctx, tsigKeyRes, gt, string(keyValue), PDNSClient, log)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if syncStatus == nil {
+		syncStatus = ptr.To(SUCCEEDED_STATUS)
+	}
+
+	// Update TSIGKeyStatus
+	tsigKeyRes, err = getTSIGKeyExternalResources(ctx, gt.GetObjectMeta().Name, PDNSClient, log)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	err = patchTSIGKeyStatus(ctx, gt, tsigKeyRes, syncStatus, cl, metav1.Condition{
+		Type:               "Available",
+		LastTransitionTime: metav1.NewTime(time.Now().UTC()),
+		Status:             conditionStatus,
+		Reason:             conditionReason,
+		Message:            conditionMessage,
+	})
+	if err != nil {
+		if errors.IsConflict(err) {
+			log.Info("Object has been modified, forcing a new reconciliation")
+			return ctrl.Result{Requeue: true}, nil
+		}
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+func getTSIGKeyExternalResources(ctx context.Context, id string, PDNSClient PdnsClienter, log logr.Logger) (*powerdns.TSIGKey, error) {
+	tsigKeyRes, err := PDNSClient.TSIGKeys.Get(ctx, id)
+	if err != nil {
+		if err.Error() != ZONE_NOT_FOUND_MSG {
+			log.Error(err, "Failed to get TSIG key")
+			return nil, err
+		}
+	}
+	return tsigKeyRes, nil
+}
+
+func createTSIGKeyExternalResources(ctx context.Context, tsigKey dnsv1alpha2.GenericTSIGKey, keyValue string, PDNSClient PdnsClienter, log logr.Logger) error {
+	_, err := PDNSClient.TSIGKeys.Create(ctx, tsigKey.GetObjectMeta().Name, tsigKey.GetSpec().Algorithm, keyValue)
+	if err != nil {
+		log.Error(err, "Failed to create TSIG key")
+		return err
+	}
+	return nil
+}
+
+func updateTSIGKeyExternalResources(ctx context.Context, tsigKey dnsv1alpha2.GenericTSIGKey, keyValue string, PDNSClient PdnsClienter, log logr.Logger) error {
+	_, err := PDNSClient.TSIGKeys.Change(ctx, tsigKey.GetObjectMeta().Name, powerdns.TSIGKey{
+		Name:      ptr.To(tsigKey.GetObjectMeta().Name),
+		Algorithm: ptr.To(tsigKey.GetSpec().Algorithm),
+		Key:       ptr.To(keyValue),
+	})
+	if err != nil {
+		log.Error(err, "Failed to update TSIG key")
+		return err
+	}
+	return nil
+}
+
+func deleteTSIGKeyExternalResources(ctx context.Context, tsigKey dnsv1alpha2.GenericTSIGKey, PDNSClient PdnsClienter, log logr.Logger) error {
+	err := PDNSClient.TSIGKeys.Delete(ctx, tsigKey.GetObjectMeta().Name)
+	// TSIG key may have already been deleted and it is not an error
+	if err != nil && err.Error() != ZONE_NOT_FOUND_MSG {
+		log.Error(err, "Failed to delete TSIG key")
+		return err
+	}
+	return nil
+}
+
+func tsigKeyExternalResourcesReconcile(ctx context.Context, tsigKeyRes *powerdns.TSIGKey, gt dnsv1alpha2.GenericTSIGKey, keyValue string, PDNSClient PdnsClienter, log logr.Logger) (*string, string, string, metav1.ConditionStatus, error) {
+	// Initialization
+	var syncStatus *string
+	conditionStatus := metav1.ConditionTrue
+	conditionReason := TSIGKeyReasonSynced
+	conditionMessage := TSIGKeyMessageSyncSucceeded
+
+	if tsigKeyRes.Name == nil {
+		// If TSIG key does not exist, create it
+		err := createTSIGKeyExternalResources(ctx, gt, keyValue, PDNSClient, log)
+		if err != nil {
+			log.Error(err, "Failed to create external resources")
+			syncStatus = ptr.To(FAILED_STATUS)
+			conditionStatus = metav1.ConditionFalse
+			conditionReason = TSIGKeyReasonSynchronizationFailed
+			conditionMessage = err.Error()
+		}
+	} else {
+		// If TSIG key exists, compare content and update it if necessary
+		if *tsigKeyRes.Algorithm != gt.GetSpec().Algorithm || *tsigKeyRes.Key != keyValue {
+			err := updateTSIGKeyExternalResources(ctx, gt, keyValue, PDNSClient, log)
+			if err != nil {
+				syncStatus = ptr.To(FAILED_STATUS)
+				conditionStatus = metav1.ConditionFalse
+				conditionReason = TSIGKeyReasonSynchronizationFailed
+				conditionMessage = err.Error()
+			}
+		}
+	}
+	return syncStatus, conditionMessage, conditionReason, conditionStatus, nil
+}
+
+func patchTSIGKeyStatus(ctx context.Context, tsigKey dnsv1alpha2.GenericTSIGKey, tsigKeyRes *powerdns.TSIGKey, status *string, cl client.Client, condition metav1.Condition) error {
+	original := tsigKey.Copy()
+
+	conditions := tsigKey.GetStatus().Conditions
+	meta.SetStatusCondition(&conditions, condition)
+	tsigKey.SetStatus(dnsv1alpha2.TSIGKeyStatus{
+		ID:                 tsigKeyRes.ID,
+		Name:               tsigKeyRes.Name,
+		Algorithm:          tsigKeyRes.Algorithm,
+		SyncStatus:         status,
+		ObservedGeneration: ptr.To(tsigKey.GetGeneration()),
+		Conditions:         conditions,
+	})
+	return cl.Status().Patch(ctx, tsigKey, client.MergeFrom(original))
 }

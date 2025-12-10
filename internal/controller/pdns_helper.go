@@ -41,9 +41,18 @@ type pdnsZonesClienter interface {
 	Add(ctx context.Context, zone *powerdns.Zone) (*powerdns.Zone, error)
 }
 
+type pdnsTSIGKeysClienter interface {
+	Get(ctx context.Context, id string) (*powerdns.TSIGKey, error)
+	Delete(ctx context.Context, id string) error
+	Change(ctx context.Context, id string, newKey powerdns.TSIGKey) (*powerdns.TSIGKey, error)
+	Create(ctx context.Context, name, algorithm, key string) (*powerdns.TSIGKey, error)
+	List(ctx context.Context) ([]powerdns.TSIGKey, error)
+}
+
 type PdnsClienter struct {
-	Records pdnsRecordsClienter
-	Zones   pdnsZonesClienter
+	Records  pdnsRecordsClienter
+	Zones    pdnsZonesClienter
+	TSIGKeys pdnsTSIGKeysClienter
 }
 
 // zoneIsIdenticalToExternalZone returns True, True if respectively kind, soa_edit_api, catalog and tsigKeyIds are identical
