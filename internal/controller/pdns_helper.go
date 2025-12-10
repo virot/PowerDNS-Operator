@@ -46,7 +46,7 @@ type PdnsClienter struct {
 	Zones   pdnsZonesClienter
 }
 
-// zoneIsIdenticalToExternalZone return True, True if respectively kind, soa_edit_api, catalog and tsigKeyIds are identical
+// zoneIsIdenticalToExternalZone returns True, True if respectively kind, soa_edit_api, catalog and tsigKeyIds are identical
 // and nameservers are identical between Zone and External Resource
 func zoneIsIdenticalToExternalZone(zone dnsv1alpha2.GenericZone, externalZone *powerdns.Zone, ns []string) (bool, bool) {
 	zoneCatalog := makeCanonical(ptr.Deref(zone.GetSpec().Catalog, ""))
